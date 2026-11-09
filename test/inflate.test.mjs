@@ -121,6 +121,43 @@ describe('Inflate emits buffered output on Z_SYNC_FLUSH', () => {
       });
     });
   });
+
+  it('Read with Z_SYNC_FLUSH reuses the output buffer for small messages', () => {
+    const messages = [];
+    for (let i = 0; i < 100; i++) messages.push(`{"op":0,"seq":${i},"d":"message ${i}"}`);
+
+    const deflator = new Deflate();
+    const pieces = messages.map(msg => {
+      const before = deflator.chunks.length;
+      deflator.push(msg, Z_SYNC_FLUSH);
+      return new Uint8Array(Buffer.concat(deflator.chunks.slice(before)));
+    });
+
+    const inflator = new Inflate();
+    for (const piece of pieces) inflator.push(piece, Z_SYNC_FLUSH);
+
+    assert.ok(!inflator.err, 'inflate error: ' + inflator.err);
+    assert.deepStrictEqual(inflator.chunks.map(chunk => Buffer.from(chunk).toString()), messages);
+    // All messages fit in one 64K output buffer - no new buffer per flush
+    assert.ok(inflator.chunks.every(chunk => chunk.buffer === inflator.chunks[0].buffer));
+  });
+
+  it('Read without flush does not touch emitted buffers', () => {
+    const data = new Uint8Array(100000).map((_, i) => (i * 7) % 251);
+    const compressed = deflate(data);
+
+    // Transfer each chunk's buffer away, as when posting it to a worker
+    const inflator = new Inflate({ chunkSize: 16384 });
+    const received = [];
+    inflator.onData = chunk => received.push(structuredClone(chunk, { transfer: [chunk.buffer] }));
+
+    for (let i = 0; i < compressed.length; i += 1000) {
+      inflator.push(compressed.subarray(i, i + 1000), i + 1000 >= compressed.length);
+    }
+
+    assert.ok(!inflator.err, 'inflate error: ' + inflator.err);
+    assert.deepStrictEqual(new Uint8Array(Buffer.concat(received)), data);
+  });
 });
 
 

@@ -303,9 +303,16 @@ class Inflate {
 
           this.onData(strm.output.length === strm.next_out ? strm.output : strm.output.subarray(0, strm.next_out));
 
-          // Force a fresh output buffer on next iteration / next push, so the
-          // already emitted tail is not sent again.
-          strm.avail_out = 0;
+          if (strm.avail_out && status !== Z_STREAM_END) {
+            // An explicit flush (e.g. Z_SYNC_FLUSH) left room in the buffer.
+            // Continue in the unused rest of it, like node's zlib does, instead
+            // of allocating a new buffer for every flushed message.
+            strm.output = strm.output.subarray(strm.next_out);
+          } else {
+            // Force a fresh output buffer on next iteration / next push, so the
+            // already emitted tail is not sent again.
+            strm.avail_out = 0;
+          }
           strm.next_out = 0;
         }
       }
